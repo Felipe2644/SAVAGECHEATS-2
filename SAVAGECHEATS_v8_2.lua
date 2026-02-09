@@ -546,20 +546,37 @@ local function DisableGunMods()
 end
 
 -- ═══════════════════════════════════════════════════════════════
---                    FOV CIRCLE
+--                    FOV CIRCLE (SAFE MODE)
 -- ═══════════════════════════════════════════════════════════════
 
 local FOVCircle = nil
 local AimLine = nil
+local DrawingSupported = false
 
 local function CreateDrawings()
+    -- Verificação de segurança para Mobile
+    local success = pcall(function()
+        local test = Drawing.new("Circle")
+        test.Visible = false
+        test:Remove()
+    end)
+
+    if not success then
+        warn("Drawing Lib não suportada ou instável. FOV Circle desativado para evitar crash.")
+        DrawingSupported = false
+        Config.FOVVisible = false
+        return
+    end
+
+    DrawingSupported = true
+
     pcall(function()
         if FOVCircle then FOVCircle:Remove() end
         if AimLine then AimLine:Remove() end
         
         FOVCircle = Drawing.new("Circle")
         FOVCircle.Thickness = 2
-        FOVCircle.NumSides = 60
+        FOVCircle.NumSides = 40 -- Reduzido para lagar menos
         FOVCircle.Radius = Config.FOVRadius
         FOVCircle.Filled = false
         FOVCircle.Visible = false
@@ -567,7 +584,7 @@ local function CreateDrawings()
         FOVCircle.Color = Theme.Primary
         
         AimLine = Drawing.new("Line")
-        AimLine.Thickness = 2
+        AimLine.Thickness = 1.5
         AimLine.Color = Theme.Success
         AimLine.Visible = false
         AimLine.ZIndex = 998
@@ -575,6 +592,8 @@ local function CreateDrawings()
 end
 
 local function UpdateDrawings()
+    if not DrawingSupported then return end
+
     if FOVCircle then
         FOVCircle.Position = GetScreenCenter()
         FOVCircle.Radius = Config.FOVRadius
@@ -582,17 +601,19 @@ local function UpdateDrawings()
         FOVCircle.Color = State.Locked and Theme.Success or Theme.Primary
     end
     
-    if AimLine and Config.ShowLine and State.Locked and State.TargetPart then
-        local targetPos, visible = WorldToScreen(State.TargetPart.Position)
-        if visible then
-            AimLine.From = GetScreenCenter()
-            AimLine.To = targetPos
-            AimLine.Visible = true
+    if AimLine then
+        if Config.ShowLine and State.Locked and State.TargetPart then
+            local targetPos, visible = WorldToScreen(State.TargetPart.Position)
+            if visible then
+                AimLine.From = GetScreenCenter()
+                AimLine.To = targetPos
+                AimLine.Visible = true
+            else
+                AimLine.Visible = false
+            end
         else
             AimLine.Visible = false
         end
-    elseif AimLine then
-        AimLine.Visible = false
     end
 end
 
@@ -1415,22 +1436,28 @@ _G.SAVAGE_V82 = true
 _G.SAVAGE_V82_CLEANUP = DestroyAll
 
 -- ═══════════════════════════════════════════════════════════════
---                    INICIALIZAÇÃO
+--                    INICIALIZAÇÃO (CORRIGIDA)
 -- ═══════════════════════════════════════════════════════════════
 
 local function Initialize()
-    print("═══════════════════════════════════════════════════")
-    print("       SAVAGECHEATS_ AIMBOT UNIVERSAL v8.2")
-    print("═══════════════════════════════════════════════════")
-    print("Jogo: " .. GameName)
+    print(">>> INICIANDO SAVAGECHEATS v8.2 MOBILE...")
     
-    CreateUI()
-    CreateDrawings()
+    -- 1. Tentar criar UI
+    local uiSuccess, uiError = pcall(CreateUI)
+    if not uiSuccess then 
+        warn("Erro ao criar UI: " .. tostring(uiError)) 
+    end
+    
+    -- 2. Tentar criar Drawings (com proteção anti-crash)
+    task.spawn(CreateDrawings)
+    
+    -- 3. Iniciar ESP e Loop
     InitESP()
     MainLoop()
     
-    LocalPlayer.CharacterAdded:Connect(function(char)
-        task.wait(1)
+    -- 4. Função para aplicar mods no personagem
+    local function OnCharacter(char)
+        task.wait(1) -- Espera carregar
         
         if Config.NoClipEnabled then EnableNoClip() end
         if Config.SpeedEnabled then EnableSpeed() end
@@ -1444,20 +1471,30 @@ local function Initialize()
             ApplyPrisonLifeBypass()
         end
         
-        -- Reconectar eventos de armas
-        if char then
-            char.ChildAdded:Connect(function(child)
-                if child:IsA("Tool") then
-                    task.wait(0.1)
-                    ModifyGun(child)
-                end
-            end)
-        end
-    end)
+        -- Detectar armas novas pegas do chão
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                task.wait(0.1)
+                ModifyGun(child)
+            end
+        end)
+    end
+
+    -- 5. Conectar evento de Respawn
+    LocalPlayer.CharacterAdded:Connect(OnCharacter)
+    
+    -- 6. Aplicar imediatamente se já estiver vivo (Bug Fix)
+    if LocalPlayer.Character then
+        task.spawn(function()
+            OnCharacter(LocalPlayer.Character)
+        end)
+    end
     
     print("═══════════════════════════════════════════════════")
-    print("✓ Carregado! Clique no botão 'S' vermelho")
+    print("✓ SCRIPT CARREGADO COM SUCESSO!")
+    print("✓ Procure pelo botão 'S' vermelho na tela.")
     print("═══════════════════════════════════════════════════")
 end
 
+-- Executar
 Initialize()
